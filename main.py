@@ -44,7 +44,7 @@ class NewsDraftRequest(BaseModel):
     """图文消息草稿请求"""
     article_type: str = Field(default="news", description="文章类型")
     title: str = Field(..., min_length=1, description="标题")
-    content: str = Field(..., min_length=1, max_length=20000, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
+    content: str = Field(..., min_length=1, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
     thumb_media_id: str = Field(..., description="封面图片 media_id，必须是永久 MediaID")
     app_id: str = Field(..., description="AppID")
     app_secret: str = Field(..., description="AppSecret")
@@ -69,7 +69,7 @@ class NewspicDraftRequest(BaseModel):
     """图片消息草稿请求"""
     article_type: str = Field(default="newspic", description="文章类型")
     title: str = Field(..., min_length=1, description="标题")
-    content: str = Field(..., min_length=1, max_length=20000, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
+    content: str = Field(..., min_length=1, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
     image_info: ImageInfo = Field(..., description="图片信息，最多20张图片，第一张为封面")
     app_id: str = Field(..., description="AppID")
     app_secret: str = Field(..., description="AppSecret")
