@@ -8,3 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
+coze_oauth_config.json

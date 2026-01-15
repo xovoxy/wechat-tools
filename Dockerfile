@@ -15,12 +15,10 @@ RUN uv sync --frozen --no-dev
 
 # 复制应用代码
 COPY main.py ./
+COPY coze_oauth_config.json ./
 
 # 暴露端口
 EXPOSE 8000
 
-# 设置环境变量，使用 uv 的虚拟环境
-ENV PATH="/app/.venv/bin:$PATH"
-
 # 运行应用
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
