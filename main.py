@@ -9,8 +9,9 @@ import json
 import asyncio
 from typing import Optional, Dict, Any, Union
 from io import BytesIO
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from pathlib import Path
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 import httpx
 from PIL import Image
@@ -18,6 +19,7 @@ from cozepy import AsyncCoze, AsyncTokenAuth, COZE_CN_BASE_URL, load_oauth_app_f
 from uvicorn.main import logger
 
 app = FastAPI(title="微信草稿 API", description="微信公众号草稿创建服务")
+BASE_DIR = Path(__file__).resolve().parent
 
 # Access token 缓存
 _token_cache: Dict[str, Dict[str, Any]] = {}
@@ -27,6 +29,40 @@ _coze_oauth_app: Optional[Any] = None
 
 # Coze access token 缓存
 _coze_token_cache: Optional[Dict[str, Any]] = None
+
+WECHAT_TITLE_MAX_LENGTH = 64
+WECHAT_AUTHOR_MAX_LENGTH = 16
+WECHAT_DIGEST_MAX_LENGTH = 120
+WECHAT_CONTENT_MAX_LENGTH = 20000
+WECHAT_CONTENT_MAX_BYTES = 1024 * 1024
+WECHAT_CONTENT_SOURCE_URL_MAX_LENGTH = 200
+
+
+def validate_wechat_content(value: str) -> str:
+    if len(value) > WECHAT_CONTENT_MAX_LENGTH:
+        raise ValueError(f"content cannot exceed {WECHAT_CONTENT_MAX_LENGTH} characters")
+
+    content_bytes = len(value.encode("utf-8"))
+    if content_bytes > WECHAT_CONTENT_MAX_BYTES:
+        raise ValueError(f"content cannot exceed {WECHAT_CONTENT_MAX_BYTES} bytes after UTF-8 encoding")
+
+    return value
+
+
+def resolve_wechat_credentials(app_id: Optional[str], app_secret: Optional[str]) -> tuple[str, str]:
+    """
+    优先使用请求里的公众号凭据；未传时读取环境变量。
+    """
+    resolved_app_id = app_id or os.getenv("WECHAT_APP_ID")
+    resolved_app_secret = app_secret or os.getenv("WECHAT_APP_SECRET")
+
+    if not resolved_app_id or not resolved_app_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="WeChat credentials are required. Provide app_id/app_secret or set WECHAT_APP_ID/WECHAT_APP_SECRET."
+        )
+
+    return resolved_app_id, resolved_app_secret
 
 
 class ImageItem(BaseModel):
@@ -57,14 +93,14 @@ class ProductInfo(BaseModel):
 class NewsDraftRequest(BaseModel):
     """图文消息草稿请求"""
     article_type: str = Field(default="news", description="文章类型")
-    title: str = Field(..., min_length=1, description="标题")
+    title: str = Field(..., min_length=1, max_length=WECHAT_TITLE_MAX_LENGTH, description="标题")
     content: str = Field(..., min_length=1, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
     thumb_media_id: Optional[str] = Field(None, description="封面图片 media_id，必须是永久 MediaID。如果提供了 digest，可以自动生成")
-    app_id: str = Field(..., description="AppID")
-    app_secret: str = Field(..., description="AppSecret")
-    author: Optional[str] = Field(None, max_length=16, description="作者，最多16字符")
-    digest: Optional[str] = Field(None, description="摘要，单图文才有，多图文为空。如果提供了 digest 但没有 thumb_media_id，将自动生成封面图")
-    content_source_url: Optional[str] = Field(None, description="原文链接")
+    app_id: Optional[str] = Field(None, description="AppID，不传则读取 WECHAT_APP_ID")
+    app_secret: Optional[str] = Field(None, description="AppSecret，不传则读取 WECHAT_APP_SECRET")
+    author: Optional[str] = Field(None, max_length=WECHAT_AUTHOR_MAX_LENGTH, description="作者，最多16字符")
+    digest: Optional[str] = Field(None, max_length=WECHAT_DIGEST_MAX_LENGTH, description="摘要，单图文才有，多图文为空。如果提供了 digest 但没有 thumb_media_id，将自动生成封面图")
+    content_source_url: Optional[str] = Field(None, max_length=WECHAT_CONTENT_SOURCE_URL_MAX_LENGTH, description="原文链接")
     need_open_comment: int = Field(default=0, ge=0, le=1, description="是否打开评论，0-关闭，1-打开")
     only_fans_can_comment: int = Field(default=0, ge=0, le=1, description="是否只有粉丝可评论，0-所有人，1-仅粉丝")
     pic_crop_235_1: Optional[str] = Field(None, description="封面裁剪坐标 2.35:1")
@@ -78,6 +114,11 @@ class NewsDraftRequest(BaseModel):
             raise ValueError('article_type must be "news" or "newspic"')
         return v
 
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        return validate_wechat_content(v)
+
     @model_validator(mode="after")
     def validate_thumb_media_id(self):
         """验证：如果既没有 digest 也没有 thumb_media_id，则报错"""
@@ -86,14 +127,59 @@ class NewsDraftRequest(BaseModel):
         return self
 
 
+class ImageUploadFromUrlRequest(BaseModel):
+    """通过图片 URL 上传素材请求"""
+    image_url: str = Field(..., description="图片 URL")
+    app_id: Optional[str] = Field(None, description="AppID，不传则读取 WECHAT_APP_ID")
+    app_secret: Optional[str] = Field(None, description="AppSecret，不传则读取 WECHAT_APP_SECRET")
+    usage: str = Field(default="cover", description="用途：cover=封面永久素材，content=正文图片")
+
+    @field_validator("usage")
+    @classmethod
+    def validate_usage(cls, v):
+        if v not in ["cover", "content"]:
+            raise ValueError('usage must be "cover" or "content"')
+        return v
+
+
+class ArticleDraftRequest(BaseModel):
+    """完整公众号图文草稿请求，适合自动化发布流程"""
+    title: str = Field(..., min_length=1, max_length=WECHAT_TITLE_MAX_LENGTH, description="标题")
+    content: str = Field(..., min_length=1, description="已经排版好的公众号 HTML 正文")
+    app_id: Optional[str] = Field(None, description="AppID，不传则读取 WECHAT_APP_ID")
+    app_secret: Optional[str] = Field(None, description="AppSecret，不传则读取 WECHAT_APP_SECRET")
+    thumb_media_id: Optional[str] = Field(None, description="封面永久素材 media_id")
+    thumb_image_url: Optional[str] = Field(None, description="封面图片 URL，服务会上传为永久素材")
+    author: Optional[str] = Field(None, max_length=WECHAT_AUTHOR_MAX_LENGTH, description="作者，最多16字符")
+    digest: Optional[str] = Field(None, max_length=WECHAT_DIGEST_MAX_LENGTH, description="摘要，建议 120 字以内")
+    content_source_url: Optional[str] = Field(None, max_length=WECHAT_CONTENT_SOURCE_URL_MAX_LENGTH, description="原文链接")
+    need_open_comment: int = Field(default=0, ge=0, le=1, description="是否打开评论")
+    only_fans_can_comment: int = Field(default=0, ge=0, le=1, description="是否只有粉丝可评论")
+    pic_crop_235_1: Optional[str] = Field(None, description="封面裁剪坐标 2.35:1")
+    pic_crop_1_1: Optional[str] = Field(None, description="封面裁剪坐标 1:1")
+    publish: bool = Field(default=False, description="是否创建草稿后立即提交发布")
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        return validate_wechat_content(v)
+
+
+class PublishDraftRequest(BaseModel):
+    """发布草稿请求"""
+    media_id: str = Field(..., description="草稿 media_id")
+    app_id: Optional[str] = Field(None, description="AppID，不传则读取 WECHAT_APP_ID")
+    app_secret: Optional[str] = Field(None, description="AppSecret，不传则读取 WECHAT_APP_SECRET")
+
+
 class NewspicDraftRequest(BaseModel):
     """图片消息草稿请求"""
     article_type: str = Field(default="newspic", description="文章类型")
-    title: str = Field(..., min_length=1, description="标题")
+    title: str = Field(..., min_length=1, max_length=WECHAT_TITLE_MAX_LENGTH, description="标题")
     content: str = Field(..., min_length=1, description="正文内容，支持HTML标签，小于20000字符且小于1MB")
     image_info: ImageInfo = Field(..., description="图片信息，最多20张图片，第一张为封面")
-    app_id: str = Field(..., description="AppID")
-    app_secret: str = Field(..., description="AppSecret")
+    app_id: Optional[str] = Field(None, description="AppID，不传则读取 WECHAT_APP_ID")
+    app_secret: Optional[str] = Field(None, description="AppSecret，不传则读取 WECHAT_APP_SECRET")
     need_open_comment: int = Field(default=0, ge=0, le=1, description="是否打开评论，0-关闭，1-打开")
     only_fans_can_comment: int = Field(default=0, ge=0, le=1, description="是否只有粉丝可评论，0-所有人，1-仅粉丝")
     cover_info: Optional[CoverInfo] = Field(None, description="封面信息")
@@ -105,6 +191,11 @@ class NewspicDraftRequest(BaseModel):
         if v != "newspic":
             raise ValueError('article_type must be "newspic"')
         return v
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v):
+        return validate_wechat_content(v)
 
     @field_validator("image_info")
     @classmethod
@@ -395,6 +486,54 @@ async def download_image(image_url: str) -> bytes:
         )
 
 
+def prepare_image_for_wechat(image_data: bytes) -> tuple[bytes, str, str]:
+    """
+    将图片规范化为微信公众号更稳定接受的 JPEG。
+
+    微信接口对图片大小和格式较敏感。自动化流程里图片来源可能是生成图、
+    CDN 图或邮件图，这里统一压缩为 10MB 以内的 JPEG。
+    """
+    max_size = 10 * 1024 * 1024
+
+    try:
+        image = Image.open(BytesIO(image_data))
+        if image.mode in ("RGBA", "P", "LA"):
+            image = image.convert("RGB")
+
+        quality = 90
+        while quality >= 50:
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            prepared_data = buffer.getvalue()
+            if len(prepared_data) <= max_size:
+                return prepared_data, "image.jpg", "image/jpeg"
+            quality -= 10
+
+        width, height = image.size
+        while len(prepared_data) > max_size and width > 800 and height > 800:
+            width = int(width * 0.85)
+            height = int(height * 0.85)
+            image = image.resize((width, height))
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=75, optimize=True)
+            prepared_data = buffer.getvalue()
+
+        if len(prepared_data) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail="Image size exceeds 10MB limit even after compression"
+            )
+
+        return prepared_data, "image.jpg", "image/jpeg"
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image data: {str(e)}"
+        )
+
+
 async def upload_image_to_wechat(image_data: bytes, access_token: str) -> str:
     """
     上传图片到微信公众号（永久素材）
@@ -416,10 +555,12 @@ async def upload_image_to_wechat(image_data: bytes, access_token: str) -> str:
     }
     
     try:
+        image_data, filename, content_type = prepare_image_for_wechat(image_data)
+
         async with httpx.AsyncClient() as client:
             # 使用 multipart/form-data 上传文件
             files = {
-                "media": ("image.jpg", image_data, "image/jpeg")
+                "media": (filename, image_data, content_type)
             }
             response = await client.post(url, params=params, files=files, timeout=30.0)
             response.raise_for_status()
@@ -439,6 +580,40 @@ async def upload_image_to_wechat(image_data: bytes, access_token: str) -> str:
         raise HTTPException(
             status_code=500,
             detail=f"Network error while uploading image: {str(e)}"
+        )
+
+
+async def upload_article_image_to_wechat(image_data: bytes, access_token: str) -> str:
+    """
+    上传正文内图片，返回可写入 content HTML 的微信图片 URL。
+    """
+    url = "https://api.weixin.qq.com/cgi-bin/media/uploadimg"
+    params = {"access_token": access_token}
+
+    try:
+        image_data, filename, content_type = prepare_image_for_wechat(image_data)
+
+        async with httpx.AsyncClient() as client:
+            files = {
+                "media": (filename, image_data, content_type)
+            }
+            response = await client.post(url, params=params, files=files, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+
+            if "url" in data:
+                return data["url"]
+
+            error_msg = data.get("errmsg", "Unknown error")
+            error_code = data.get("errcode", -1)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to upload article image to WeChat: {error_msg} (errcode: {error_code})"
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Network error while uploading article image: {str(e)}"
         )
 
 
@@ -538,6 +713,35 @@ async def create_draft(request_data: Dict[str, Any], access_token: str) -> Dict[
         raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
 
 
+async def publish_draft(media_id: str, access_token: str) -> Dict[str, Any]:
+    """
+    提交发布草稿。
+
+    注意：个人公众号或未开通相关权限的账号，微信可能会返回权限错误。
+    """
+    url = "https://api.weixin.qq.com/cgi-bin/freepublish/submit"
+    params = {"access_token": access_token}
+    payload = {"media_id": media_id}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, params=params, json=payload, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("errcode", 0) == 0 or "publish_id" in data:
+                return data
+
+            error_msg = data.get("errmsg", "Unknown error")
+            error_code = data.get("errcode", -1)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to publish draft: {error_msg} (errcode: {error_code})"
+            )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Network error: {str(e)}")
+
+
 @app.post("/api/draft/create")
 async def create_draft_endpoint(request: Union[NewsDraftRequest, NewspicDraftRequest]):
     """
@@ -557,7 +761,8 @@ async def create_draft_endpoint(request: Union[NewsDraftRequest, NewspicDraftReq
                 )
             
             # 获取 access_token（在生成封面图之前需要）
-            access_token = await get_access_token(request.app_id, request.app_secret)
+            app_id, app_secret = resolve_wechat_credentials(request.app_id, request.app_secret)
+            access_token = await get_access_token(app_id, app_secret)
             
             if request.digest:
                 try:
@@ -597,7 +802,8 @@ async def create_draft_endpoint(request: Union[NewsDraftRequest, NewspicDraftReq
                 )
             
             # 获取 access_token（对于 NewspicDraftRequest，在这里获取）
-            access_token = await get_access_token(request.app_id, request.app_secret)
+            app_id, app_secret = resolve_wechat_credentials(request.app_id, request.app_secret)
+            access_token = await get_access_token(app_id, app_secret)
         
         # 构建请求数据，排除 app_id 和 app_secret
         request_dict = request.model_dump(exclude={"app_id", "app_secret"})
@@ -606,12 +812,136 @@ async def create_draft_endpoint(request: Union[NewsDraftRequest, NewspicDraftReq
         result = await create_draft(request_dict, access_token)
         
         return {
-            "status": "success"
+            "status": "success",
+            "draft": result
         }
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/material/upload-image-url")
+async def upload_image_url_endpoint(request: ImageUploadFromUrlRequest):
+    """
+    通过图片 URL 上传公众号素材。
+
+    - usage=cover：上传永久图片素材，返回 media_id，可作为封面 thumb_media_id
+    - usage=content：上传正文图片，返回 url，可写入文章 HTML 的 img src
+    """
+    app_id, app_secret = resolve_wechat_credentials(request.app_id, request.app_secret)
+    access_token = await get_access_token(app_id, app_secret)
+    image_data = await download_image(request.image_url)
+
+    if request.usage == "cover":
+        media_id = await upload_image_to_wechat(image_data, access_token)
+        return {
+            "status": "success",
+            "usage": request.usage,
+            "media_id": media_id
+        }
+
+    image_url = await upload_article_image_to_wechat(image_data, access_token)
+    return {
+        "status": "success",
+        "usage": request.usage,
+        "url": image_url
+    }
+
+
+@app.post("/api/material/upload-image-file")
+async def upload_image_file_endpoint(
+    app_id: Optional[str] = Form(None),
+    app_secret: Optional[str] = Form(None),
+    usage: str = Form("cover"),
+    media: UploadFile = File(...)
+):
+    """
+    通过 multipart 文件上传公众号素材。
+    """
+    if usage not in ["cover", "content"]:
+        raise HTTPException(status_code=400, detail='usage must be "cover" or "content"')
+
+    image_data = await media.read()
+    resolved_app_id, resolved_app_secret = resolve_wechat_credentials(app_id, app_secret)
+    access_token = await get_access_token(resolved_app_id, resolved_app_secret)
+
+    if usage == "cover":
+        media_id = await upload_image_to_wechat(image_data, access_token)
+        return {
+            "status": "success",
+            "usage": usage,
+            "media_id": media_id
+        }
+
+    image_url = await upload_article_image_to_wechat(image_data, access_token)
+    return {
+        "status": "success",
+        "usage": usage,
+        "url": image_url
+    }
+
+
+@app.post("/api/article/create-draft")
+async def create_article_draft_endpoint(request: ArticleDraftRequest):
+    """
+    创建完整公众号图文草稿。
+
+    自动化任务推荐调用这个接口：
+    - 可以直接传 thumb_image_url，服务会上传封面并创建草稿
+    - content 应传入已经排好版、图片 src 已替换为微信图片 URL 的 HTML
+    - publish=true 时会在创建草稿后尝试提交发布
+    """
+    app_id, app_secret = resolve_wechat_credentials(request.app_id, request.app_secret)
+    access_token = await get_access_token(app_id, app_secret)
+
+    thumb_media_id = request.thumb_media_id
+    if not thumb_media_id and request.thumb_image_url:
+        image_data = await download_image(request.thumb_image_url)
+        thumb_media_id = await upload_image_to_wechat(image_data, access_token)
+
+    article = {
+        "article_type": "news",
+        "title": request.title,
+        "content": request.content,
+        "thumb_media_id": thumb_media_id,
+        "author": request.author,
+        "digest": request.digest,
+        "content_source_url": request.content_source_url,
+        "need_open_comment": request.need_open_comment,
+        "only_fans_can_comment": request.only_fans_can_comment,
+        "pic_crop_235_1": request.pic_crop_235_1,
+        "pic_crop_1_1": request.pic_crop_1_1,
+    }
+    article = {key: value for key, value in article.items() if value is not None}
+
+    draft_result = await create_draft(article, access_token)
+    response: Dict[str, Any] = {
+        "status": "success",
+        "draft": draft_result
+    }
+    if thumb_media_id:
+        response["thumb_media_id"] = thumb_media_id
+
+    if request.publish:
+        publish_result = await publish_draft(draft_result["media_id"], access_token)
+        response["publish"] = publish_result
+
+    return response
+
+
+@app.post("/api/draft/publish")
+async def publish_draft_endpoint(request: PublishDraftRequest):
+    """
+    提交发布已有草稿。
+    """
+    app_id, app_secret = resolve_wechat_credentials(request.app_id, request.app_secret)
+    access_token = await get_access_token(app_id, app_secret)
+    result = await publish_draft(request.media_id, access_token)
+    return {
+        "status": "success",
+        "publish": result
+    }
 
 
 @app.get("/")
@@ -621,9 +951,20 @@ async def root():
         "name": "微信草稿 API",
         "version": "0.1.0",
         "endpoints": {
-            "create_draft": "/api/draft/create (POST)"
+            "create_draft": "/api/draft/create (POST)",
+            "upload_image_url": "/api/material/upload-image-url (POST)",
+            "upload_image_file": "/api/material/upload-image-file (POST)",
+            "create_article_draft": "/api/article/create-draft (POST)",
+            "publish_draft": "/api/draft/publish (POST)",
+            "html_draft_studio": "/ui (GET)"
         }
     }
+
+
+@app.get("/ui", response_class=FileResponse)
+async def html_draft_studio():
+    """HTML 粘贴转微信公众号草稿工作台。"""
+    return FileResponse(BASE_DIR / "html_draft_studio.html")
 
 
 @app.get("/health")
