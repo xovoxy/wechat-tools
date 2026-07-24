@@ -900,6 +900,12 @@ async def create_article_draft_endpoint(request: ArticleDraftRequest):
         image_data = await download_image(request.thumb_image_url)
         thumb_media_id = await upload_image_to_wechat(image_data, access_token)
 
+    if not thumb_media_id:
+        raise HTTPException(
+            status_code=400,
+            detail="WeChat news drafts require a cover thumb_media_id. Upload a cover image or provide an existing permanent image media_id."
+        )
+
     article = {
         "article_type": "news",
         "title": request.title,

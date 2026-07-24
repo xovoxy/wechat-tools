@@ -649,7 +649,7 @@
                 <input id="sourceUrlInput" maxlength="200" />
               </div>
               <div class="field">
-                <label for="coverFileInput">封面图片（可选）</label>
+                <label for="coverFileInput">封面图片</label>
                 <div class="cover-picker">
                   <label class="file-btn">
                     上传封面
@@ -662,7 +662,7 @@
                 <div class="cover-status" id="coverStatus">未选择封面</div>
               </div>
               <div class="field">
-                <label for="thumbMediaInput">封面 media_id（可选）</label>
+                <label for="thumbMediaInput">封面 media_id</label>
                 <input id="thumbMediaInput" />
               </div>
               <div class="field">
@@ -802,27 +802,61 @@
       logList: $("logList")
     };
 
-    const rootStyleProps = [
-      "box-sizing", "display", "font-family", "font-size", "font-weight", "font-style",
-      "line-height", "color", "letter-spacing", "text-align", "background-color",
-      "margin-top", "margin-right", "margin-bottom", "margin-left",
-      "padding-top", "padding-right", "padding-bottom", "padding-left",
-      "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
-      "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
-      "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
-      "border-radius", "box-shadow", "max-width", "overflow-wrap"
+    const WECHAT_CONTENT_MAX_LENGTH = 20000;
+    const WECHAT_CONTENT_MAX_BYTES = 1024 * 1024;
+
+    const textStyleProps = [
+      "font-family", "font-size", "font-weight", "font-style", "line-height", "color",
+      "letter-spacing", "text-align", "text-decoration-line", "text-decoration-color",
+      "text-decoration-style", "text-indent", "white-space", "word-break", "overflow-wrap"
     ];
 
-    const authoredStyleProps = [
-      "display", "font-size", "font-weight", "font-style", "line-height", "color",
-      "letter-spacing", "text-align", "background-color",
+    const inheritedTextStyleProps = [
+      "font-size", "font-weight", "font-style", "line-height", "color", "letter-spacing",
+      "text-align", "text-decoration-line", "text-indent"
+    ];
+
+    const boxStyleProps = [
+      "box-sizing", "background-color",
       "margin-top", "margin-right", "margin-bottom", "margin-left",
       "padding-top", "padding-right", "padding-bottom", "padding-left",
       "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
       "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
       "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
-      "border-radius", "box-shadow", "max-width"
+      "border-radius", "width", "min-width", "max-width", "height", "max-height",
+      "vertical-align", "list-style-type", "list-style-position", "border-collapse", "table-layout"
     ];
+
+    const wechatStyleProps = [...new Set(["display", ...textStyleProps, ...boxStyleProps])];
+
+    const richTextTags = new Set([
+      "A", "B", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "FIGCAPTION", "FIGURE",
+      "H1", "H2", "H3", "H4", "H5", "H6", "HR", "I", "IMG", "LI", "MARK",
+      "OL", "P", "PRE", "S", "SECTION", "SMALL", "SPAN", "STRONG", "SUB", "SUP",
+      "TABLE", "TBODY", "TD", "TFOOT", "TH", "THEAD", "TR", "U", "UL"
+    ]);
+
+    const textStyleTags = new Set([
+      "A", "B", "BLOCKQUOTE", "CODE", "DIV", "EM", "FIGCAPTION", "H1", "H2", "H3",
+      "H4", "H5", "H6", "I", "LI", "MARK", "P", "PRE", "S", "SECTION", "SMALL",
+      "SPAN", "STRONG", "SUB", "SUP", "TD", "TH", "U"
+    ]);
+
+    const blockedElements = [
+      "script", "noscript", "iframe", "object", "embed", "form", "input", "button",
+      "textarea", "select", "option", "canvas", "svg", "video", "audio", "source",
+      "track", "template"
+    ].join(",");
+
+    const allowedAttributes = {
+      A: new Set(["href", "style", "title"]),
+      IMG: new Set(["src", "alt", "style", "title", "data-draft-image-id"]),
+      TD: new Set(["colspan", "rowspan", "style", "title"]),
+      TH: new Set(["colspan", "rowspan", "style", "title"]),
+      OL: new Set(["start", "style", "title"]),
+      LI: new Set(["value", "style", "title"])
+    };
+    const commonAllowedAttributes = new Set(["style", "title"]);
 
     function detectApiBase() {
       const path = window.location.pathname.replace(/\/$/, "");
@@ -853,14 +887,21 @@
       return encoder.encode(value || "").length;
     }
 
-    function normalizeSrc(src) {
-      if (!src) return "";
-      if (/^(data:image\/|blob:|https?:\/\/)/.test(src)) return src;
+    function normalizeUrl(value, baseUrl = window.location.href, allowedProtocols = ["http:", "https:"]) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      if (raw.startsWith("#")) return raw;
       try {
-        return new URL(src, window.location.href).href;
+        const url = new URL(raw, baseUrl);
+        return allowedProtocols.includes(url.protocol) ? url.href : "";
       } catch {
-        return src;
+        return "";
       }
+    }
+
+    function normalizeSrc(src, baseUrl = window.location.href) {
+      if (/^data:/i.test(String(src || "")) && !/^data:image\//i.test(String(src || ""))) return "";
+      return normalizeUrl(src, baseUrl, ["http:", "https:", "data:", "blob:", "file:"]);
     }
 
     function getEffectiveSrc(image) {
@@ -891,22 +932,94 @@
       return doc.querySelector("main") || doc.querySelector("article") || doc.querySelector("[role='main']") || doc.body;
     }
 
-    function cleanClone(root) {
-      root.querySelectorAll("script, style, link, meta, title, noscript").forEach((node) => node.remove());
-      root.querySelectorAll("*").forEach((node) => {
-        [...node.attributes].forEach((attr) => {
-          if (attr.name.toLowerCase().startsWith("on")) node.removeAttribute(attr.name);
-        });
-      });
+    function resolveDocumentBase(doc, sourceUrl = "") {
+      const declaredBase = doc.querySelector("base[href]")?.getAttribute("href") || "";
+      return normalizeUrl(declaredBase || sourceUrl || window.location.href, window.location.href, ["http:", "https:", "file:"])
+        || window.location.href;
     }
 
-    function shouldSkipStyle(prop, value) {
-      if (!value) return true;
-      if (value === "normal" && ["letter-spacing", "text-decoration-line"].includes(prop)) return true;
-      if (value === "none" && ["box-shadow", "text-decoration-line"].includes(prop)) return true;
-      if (["rgba(0, 0, 0, 0)", "transparent"].includes(value) && prop === "background-color") return true;
-      if (value === "0px" && /^(padding|border|margin).*|^max-width$/.test(prop)) return true;
+    function prepareSafeDocument(html, sourceUrl = "") {
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      const baseUrl = resolveDocumentBase(parsed, sourceUrl);
+      const stats = { blocked: 0, stylesheets: 0, attributes: 0 };
+
+      stats.blocked = parsed.querySelectorAll(blockedElements).length;
+      parsed.querySelectorAll(blockedElements).forEach((node) => node.remove());
+
+      stats.stylesheets = parsed.querySelectorAll("link[rel~='stylesheet']").length;
+      parsed.querySelectorAll("link, base, meta[http-equiv], meta[charset]").forEach((node) => node.remove());
+      parsed.querySelectorAll("style").forEach((node) => {
+        node.textContent = node.textContent.replace(/@import\s+[^;]+;?/gi, "");
+      });
+
+      parsed.querySelectorAll("*").forEach((node) => {
+        [...node.attributes].forEach((attr) => {
+          const name = attr.name.toLowerCase();
+          const value = attr.value.trim();
+          const isEvent = name.startsWith("on");
+          const isExecutableUrl = ["href", "src", "action", "formaction", "poster", "background", "xlink:href"]
+            .includes(name) && /^(?:javascript|vbscript):/i.test(value);
+          if (isEvent || isExecutableUrl || ["srcdoc", "nonce", "integrity"].includes(name)) {
+            node.removeAttribute(attr.name);
+            stats.attributes += 1;
+          }
+        });
+      });
+
+      return {
+        html: `<!doctype html>${parsed.documentElement.outerHTML}`,
+        baseUrl,
+        stats
+      };
+    }
+
+    function shouldSkipStyle(prop, value, isAuthored = false) {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized) return true;
+      if (/expression\s*\(|javascript:|vbscript:|url\s*\(/i.test(normalized)) return true;
+      if (["initial", "inherit", "revert", "revert-layer", "unset"].includes(normalized)) return true;
+      if (normalized === "normal" && ["font-style", "letter-spacing", "line-height", "text-decoration-line"].includes(prop)) return true;
+      if (normalized === "none" && ["max-width", "max-height", "text-decoration-line", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style"].includes(prop)) return true;
+      if (normalized === "auto" && ["width", "min-width", "max-width", "height", "max-height"].includes(prop)) return true;
+      if (["rgba(0, 0, 0, 0)", "transparent"].includes(normalized) && /(?:background|border.*color)/.test(prop)) return true;
+      if (!isAuthored && /^(?:0|0px|0em|0rem|0%)$/.test(normalized) && /^(?:padding|border.*width|border-radius|margin|text-indent)/.test(prop)) return true;
+      if (!isAuthored && normalized === "400" && prop === "font-weight") return true;
+      if (!isAuthored && ["start", "left"].includes(normalized) && prop === "text-align") return true;
+      if (prop === "display" && !["block", "inline", "inline-block", "list-item", "table", "table-row", "table-cell", "table-header-group", "table-row-group", "table-footer-group"].includes(normalized)) return true;
       return false;
+    }
+
+    function getMatchingStyleProps(node, win) {
+      const matchedProps = new Set();
+
+      function collectRules(rules) {
+        for (const rule of rules) {
+          if (rule.selectorText) {
+            try {
+              if (node.matches(rule.selectorText)) {
+                wechatStyleProps.forEach((prop) => {
+                  if (rule.style?.getPropertyValue(prop)) matchedProps.add(prop);
+                });
+              }
+            } catch {
+              continue;
+            }
+          }
+          if (rule.cssRules) {
+            const conditionMatches = !rule.conditionText || win.matchMedia(rule.conditionText).matches;
+            if (conditionMatches) collectRules(rule.cssRules);
+          }
+        }
+      }
+
+      for (const sheet of win.document.styleSheets) {
+        try {
+          collectRules(sheet.cssRules);
+        } catch {
+          continue;
+        }
+      }
+      return matchedProps;
     }
 
     function keepImageFluid(node) {
@@ -917,31 +1030,55 @@
       if (!node.style.getPropertyValue("height")) node.style.setProperty("height", "auto");
     }
 
+    function sanitizeInlineStyle(node, styleRecord) {
+      const cleanStyle = document.createElement("span").style;
+      wechatStyleProps.forEach((prop) => {
+        const authoredValue = styleRecord?.authored.get(prop) || "";
+        const computedValue = styleRecord?.computed.get(prop) || node.style.getPropertyValue(prop);
+        const authoredIsDynamic = /(?:var|calc|min|max|clamp)\s*\(/i.test(authoredValue);
+        const value = authoredValue && !authoredIsDynamic ? authoredValue : computedValue;
+        const isAuthored = Boolean(authoredValue && !authoredIsDynamic);
+        if (shouldSkipStyle(prop, value, isAuthored)) return;
+        cleanStyle.setProperty(prop, value);
+      });
+
+      if (cleanStyle.length) node.setAttribute("style", cleanStyle.cssText);
+      else node.removeAttribute("style");
+    }
+
     function inlineComputedStyles(sourceRoot, cloneRoot, win) {
       const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
       const cloneNodes = [cloneRoot, ...cloneRoot.querySelectorAll("*")];
+      const styleRecords = new WeakMap();
 
       sourceNodes.forEach((sourceNode, index) => {
         const cloneNode = cloneNodes[index];
         if (!cloneNode || cloneNode.nodeType !== 1) return;
 
         const isRoot = sourceNode === sourceRoot;
-        const hasInlineStyle = Boolean(cloneNode.getAttribute("style"));
-        const hasSelectorStyle = Boolean(sourceNode.id || sourceNode.classList?.length);
-
-        if (!isRoot && (hasInlineStyle || !hasSelectorStyle)) {
-          keepImageFluid(cloneNode);
-          return;
-        }
+        const selectorProps = getMatchingStyleProps(sourceNode, win);
+        const authored = new Map();
+        const computedValues = new Map();
+        wechatStyleProps.forEach((prop) => {
+          const value = cloneNode.style.getPropertyValue(prop);
+          if (value) authored.set(prop, value);
+        });
 
         const computed = win.getComputedStyle(sourceNode);
-        const props = isRoot ? rootStyleProps : authoredStyleProps;
+        const props = new Set();
+        if (isRoot) textStyleProps.forEach((prop) => props.add(prop));
+        else if (textStyleTags.has(sourceNode.tagName)) inheritedTextStyleProps.forEach((prop) => props.add(prop));
+        selectorProps.forEach((prop) => props.add(prop));
+        authored.forEach((value, prop) => props.add(prop));
         props.forEach((prop) => {
           const value = computed.getPropertyValue(prop);
-          if (shouldSkipStyle(prop, value)) return;
+          computedValues.set(prop, value);
+          if (shouldSkipStyle(prop, value, false)) return;
           if (cloneNode.style.getPropertyValue(prop)) return;
           cloneNode.style.setProperty(prop, value);
         });
+
+        styleRecords.set(cloneNode, { authored, computed: computedValues });
 
         if (isRoot && computed.getPropertyValue("max-width") !== "none") {
           cloneNode.style.setProperty("margin-left", "auto");
@@ -950,55 +1087,116 @@
 
         keepImageFluid(cloneNode);
       });
+
+      return styleRecords;
     }
 
-    async function renderAndInline(html) {
+    function unwrapNode(node) {
+      const parent = node.parentNode;
+      if (!parent) return;
+      while (node.firstChild) parent.insertBefore(node.firstChild, node);
+      node.remove();
+    }
+
+    function cleanClone(root, baseUrl, styleRecords) {
+      root.querySelectorAll(`${blockedElements}, style, link, meta, title`).forEach((node) => node.remove());
+
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+      const comments = [];
+      while (walker.nextNode()) comments.push(walker.currentNode);
+      comments.forEach((node) => node.remove());
+
+      [...root.querySelectorAll("*")].forEach((node) => {
+        sanitizeInlineStyle(node, styleRecords.get(node));
+
+        if (node.tagName === "A") {
+          const href = normalizeUrl(node.getAttribute("href"), baseUrl, ["http:", "https:", "mailto:", "tel:"]);
+          if (href) node.setAttribute("href", href);
+          else node.removeAttribute("href");
+        }
+
+        if (node.tagName === "IMG") {
+          const src = normalizeSrc(node.getAttribute("src"), baseUrl);
+          if (src) node.setAttribute("src", src);
+          else node.removeAttribute("src");
+          keepImageFluid(node);
+        }
+
+        const allowed = allowedAttributes[node.tagName] || commonAllowedAttributes;
+        [...node.attributes].forEach((attr) => {
+          if (!allowed.has(attr.name.toLowerCase())) node.removeAttribute(attr.name);
+        });
+      });
+
+      [...root.querySelectorAll("*")].reverse().forEach((node) => {
+        if (!richTextTags.has(node.tagName)) unwrapNode(node);
+      });
+    }
+
+    async function renderAndInline(html, sourceUrl = "") {
+      const prepared = prepareSafeDocument(html, sourceUrl);
       const frame = document.createElement("iframe");
       frame.className = "hidden-frame";
       frame.setAttribute("aria-hidden", "true");
+      frame.setAttribute("sandbox", "allow-same-origin");
       document.body.appendChild(frame);
 
-      const doc = frame.contentDocument;
-      doc.open();
-      doc.write(html);
-      doc.close();
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      try {
+        const doc = frame.contentDocument;
+        doc.open();
+        doc.write(prepared.html);
+        doc.close();
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-      const root = findArticleRoot(doc);
-      if (!root) {
+        const root = findArticleRoot(doc);
+        if (!root) throw new Error("没有找到文章主体");
+
+        const clone = root.cloneNode(true);
+        const styleRecords = inlineComputedStyles(root, clone, frame.contentWindow);
+
+        const sourceImages = [...root.querySelectorAll("img")];
+        const cloneImages = [...clone.querySelectorAll("img")];
+        const images = sourceImages.map((img, index) => {
+          const id = `img-${index}`;
+          const original = img.getAttribute("src")
+            || img.getAttribute("data-src")
+            || img.getAttribute("data-original")
+            || img.getAttribute("data-lazy-src")
+            || "";
+          const normalized = normalizeSrc(original, prepared.baseUrl);
+          const cloneImg = cloneImages[index];
+          if (cloneImg) {
+            if (normalized) cloneImg.setAttribute("src", normalized);
+            cloneImg.setAttribute("data-draft-image-id", id);
+          }
+
+          return {
+            id,
+            index,
+            original,
+            normalized,
+            alt: img.getAttribute("alt") || `图片 ${index + 1}`,
+            replacementSrc: "",
+            replacementName: ""
+          };
+        });
+
+        cleanClone(clone, prepared.baseUrl, styleRecords);
+
+        const wrapper = document.createElement("section");
+        wrapper.innerHTML = clone.innerHTML;
+        wrapper.setAttribute("style", clone.getAttribute("style") || "");
+        sanitizeInlineStyle(wrapper, styleRecords.get(clone));
+
+        const warnings = [];
+        if (prepared.stats.blocked) warnings.push(`已移除 ${prepared.stats.blocked} 个脚本或交互节点`);
+        if (prepared.stats.stylesheets) warnings.push(`忽略了 ${prepared.stats.stylesheets} 个外部样式表`);
+        if (prepared.stats.attributes) warnings.push(`已移除 ${prepared.stats.attributes} 个危险属性`);
+
+        return { contentHtml: wrapper.outerHTML, images, warnings };
+      } finally {
         frame.remove();
-        throw new Error("没有找到文章主体");
       }
-
-      const clone = root.cloneNode(true);
-      cleanClone(clone);
-      inlineComputedStyles(root, clone, frame.contentWindow);
-
-      const sourceImages = [...root.querySelectorAll("img")];
-      const cloneImages = [...clone.querySelectorAll("img")];
-      const images = sourceImages.map((img, index) => {
-        const id = `img-${index}`;
-        const original = img.getAttribute("src") || "";
-        const cloneImg = cloneImages[index];
-        if (cloneImg) cloneImg.setAttribute("data-draft-image-id", id);
-
-        return {
-          id,
-          index,
-          original,
-          normalized: normalizeSrc(original),
-          alt: img.getAttribute("alt") || `图片 ${index + 1}`,
-          replacementSrc: "",
-          replacementName: ""
-        };
-      });
-
-      const wrapper = document.createElement("section");
-      wrapper.innerHTML = clone.innerHTML;
-      wrapper.setAttribute("style", clone.getAttribute("style") || "");
-
-      frame.remove();
-      return { contentHtml: wrapper.outerHTML, images };
     }
 
     function extractMeta(html) {
@@ -1029,6 +1227,24 @@
       return doc.body.innerHTML;
     }
 
+    function getEstimatedUploadContent() {
+      if (!state.parsed) return "";
+      const placeholder = "https://mmbiz.qpic.cn/wechat-draft-image";
+      return stripDraftImageIds(buildContentWithImageSources(() => placeholder));
+    }
+
+    function validateContentSize(content) {
+      const length = content.length;
+      const bytes = byteLength(content);
+      if (length > WECHAT_CONTENT_MAX_LENGTH) {
+        throw new Error(`正文转换后有 ${length} 个字符，超过微信接口限制 ${WECHAT_CONTENT_MAX_LENGTH}`);
+      }
+      if (bytes > WECHAT_CONTENT_MAX_BYTES) {
+        throw new Error(`正文转换后有 ${bytes} 字节，超过微信接口 1 MB 限制`);
+      }
+      return { length, bytes };
+    }
+
     function refreshPreview() {
       if (!state.parsed) {
         showBlankPreview();
@@ -1042,8 +1258,12 @@
     function updateMetrics() {
       const title = els.titleInput.value || "";
       const replaced = state.images.filter((image) => image.replacementSrc).length;
+      const estimatedContent = getEstimatedUploadContent();
+      const contentLength = estimatedContent.length;
       els.titleMetric.textContent = `${title.length} / 64`;
-      els.contentMetric.textContent = `${state.contentHtml.length} 字`;
+      els.contentMetric.textContent = `${contentLength} / ${WECHAT_CONTENT_MAX_LENGTH}`;
+      els.contentMetric.title = estimatedContent ? `${byteLength(estimatedContent)} bytes` : "";
+      els.contentMetric.style.color = contentLength > WECHAT_CONTENT_MAX_LENGTH ? "#b84838" : "";
       els.imageMetric.textContent = String(state.images.length);
       els.replaceMetric.textContent = String(replaced);
       els.imageCount.textContent = `${state.images.length} images`;
@@ -1105,7 +1325,7 @@
       setBusy(true);
       try {
         const meta = extractMeta(html);
-        const rendered = await renderAndInline(html);
+        const rendered = await renderAndInline(html, els.sourceUrlInput.value.trim());
         state.parsed = true;
         state.contentHtml = rendered.contentHtml;
         state.images = rendered.images;
@@ -1115,7 +1335,14 @@
 
         renderImages();
         refreshPreview();
-        addLog("解析完成", `${state.images.length} 张图片`);
+        const estimatedContent = getEstimatedUploadContent();
+        addLog("解析完成", `${state.images.length} 张图片 · ${estimatedContent.length} 字符`);
+        rendered.warnings.forEach((warning) => addLog("已安全清理", warning, "warn"));
+        try {
+          validateContentSize(estimatedContent);
+        } catch (error) {
+          addLog("正文过长", error.message || String(error), "warn");
+        }
       } catch (error) {
         state.parsed = false;
         addLog("解析失败", error.message || String(error), "warn");
@@ -1196,25 +1423,41 @@
 
       setBusy(true);
       try {
+        validateContentSize(getEstimatedUploadContent());
         const uploadedMap = new Map();
         const uniqueSources = [...new Set(state.images.map((image) => getEffectiveSrc(image)).filter(Boolean))];
 
         for (const [index, src] of uniqueSources.entries()) {
           addLog(`上传正文图 ${index + 1}/${uniqueSources.length}`, src);
           const result = await uploadImage(src, "content");
+          if (!result.url) throw new Error(`正文图 ${index + 1} 上传成功，但微信未返回图片 URL`);
           uploadedMap.set(src, result.url);
+          addLog(
+            `正文图 ${index + 1}/${uniqueSources.length} 上传成功`,
+            `url = ${result.url}`
+          );
         }
 
         let thumbMediaId = els.thumbMediaInput.value.trim();
         if (!thumbMediaId && state.coverSrc) {
           addLog("上传封面", state.coverName || "cover image");
           const coverResult = await uploadImage(state.coverSrc, "cover");
+          if (!coverResult.media_id) throw new Error("封面上传成功，但微信未返回素材 media_id");
           thumbMediaId = coverResult.media_id;
+          addLog("封面上传成功", `media_id = ${thumbMediaId}`);
+        } else if (thumbMediaId) {
+          addLog("使用已有封面素材", `media_id = ${thumbMediaId}`);
         }
+        if (!thumbMediaId) {
+          throw new Error("微信图文草稿需要封面：请上传封面图片，或填写已有永久素材 media_id。");
+        }
+
+        const finalContent = replaceContentImages(uploadedMap);
+        validateContentSize(finalContent);
 
         const body = {
           title,
-          content: replaceContentImages(uploadedMap),
+          content: finalContent,
           thumb_media_id: thumbMediaId || undefined,
           author: trimText(els.authorInput.value, 16) || undefined,
           digest: trimText(els.digestInput.value, 120) || undefined,
@@ -1226,7 +1469,7 @@
         };
 
         const result = await postJson("/api/article/create-draft", body);
-        addLog("草稿创建成功", result.draft?.media_id || "");
+        addLog("草稿创建成功", `media_id = ${result.draft?.media_id || "微信未返回"}`);
       } catch (error) {
         addLog("上传失败", error.message || String(error), "warn");
       } finally {

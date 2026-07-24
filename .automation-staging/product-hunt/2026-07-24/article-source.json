@@ -1,0 +1,235 @@
+{
+  "date": "2026-07-24",
+  "article_type": "opportunity_research",
+  "core_opportunity": "Apple 把高质量本地语音转写下沉为系统能力，免费开源产品进一步压低基础功能价格；对小产品来说，可收费价值转向让高频 Mac 用户控制原话、清理、术语、历史和应用场景，而不是再卖一层通用转写。",
+  "verified_facts": [
+    {
+      "claim": "Apple SpeechAnalyzer/SpeechTranscriber 向开发者提供本地语音转写能力，适用于低延迟、长音频和对隐私有要求的场景，模型资源由系统管理。",
+      "source_urls": [
+        "https://developer.apple.com/documentation/Speech/SpeechAnalyzer",
+        "https://developer.apple.com/videos/play/wwdc2025/277/"
+      ],
+      "checked_at": "2026-07-24"
+    },
+    {
+      "claim": "Megaphone 要求 macOS 26 和 Apple silicon，使用 SpeechAnalyzer 与本地 Foundation Models，提供 Exact/Basic/Smart、私有词典和应用上下文；免费且采用 MIT 许可证。",
+      "source_urls": [
+        "https://www.producthunt.com/products/megaphone-3",
+        "https://megaphone.kuber.studio/",
+        "https://github.com/Kuberwastaken/megaphone"
+      ],
+      "checked_at": "2026-07-24"
+    },
+    {
+      "claim": "SpeakUp 官网当前为 €29 一次性、14 天试用，面向 Apple silicon Mac，主张本地忠实转写而非默认改写原话。",
+      "source_urls": [
+        "https://www.getspeakup.app/"
+      ],
+      "checked_at": "2026-07-24"
+    },
+    {
+      "claim": "VoiceInk 源码采用 GPL，可自行构建；官网当前一次性许可为 $25（1 台）、$39（2 台）、$49（3 台），付费编译版提供自动更新与支持。",
+      "source_urls": [
+        "https://github.com/Beingpax/VoiceInk",
+        "https://tryvoiceink.com/pricing"
+      ],
+      "checked_at": "2026-07-24"
+    },
+    {
+      "claim": "Superwhisper 官方当前为 $8.49/月、$84.99/年、$249.99 终身；Pro 包含本地模型、模式、词典与说话人分离。",
+      "source_urls": [
+        "https://superwhisper.com/docs/get-started/sw-pro"
+      ],
+      "checked_at": "2026-07-24"
+    },
+    {
+      "claim": "Wispr Flow 官方当前 Pro 为 $15/用户/月，另有企业档。",
+      "source_urls": [
+        "https://wisprflow.ai/business"
+      ],
+      "checked_at": "2026-07-24"
+    }
+  ],
+  "user_signals": [
+    {
+      "signal": "Megaphone 的 PH 用户首先追问技术/代码语音准确率、私有词典跨 Mac、与系统 Dictation 的差异和跨句自我纠正，说明本地只在术语与控制可靠时有价值。",
+      "evidence_type": "ph_comments",
+      "source_url": "https://www.producthunt.com/products/megaphone-3",
+      "limitation": "PH 评论样本小，且部分是提问而非长期使用反馈。"
+    },
+    {
+      "signal": "一名自述每日使用 Wispr Flow 的付费用户表示，首次措辞和标点无需修改是付费理由，并愿意用更慢速度换回准确率。",
+      "evidence_type": "external_user",
+      "source_url": "https://www.reddit.com/r/WisprFlow/comments/1ugj6ul/can_we_get_the_old_wispr_flow_accuracy_back/",
+      "limitation": "匿名社区小样本，无法外推全部用户。"
+    },
+    {
+      "signal": "一名用户因转写历史缺少明显保护而不愿输入机密内容；产品回复表明可配置自动删除，说明数据生命周期需要被用户看见。",
+      "evidence_type": "external_user",
+      "source_url": "https://www.reddit.com/r/WisprFlow/comments/1ugzkyi/wisprflows_history_is_a_huge_privacy_risk/",
+      "limitation": "单一用户体验，且存在设置可缓解。"
+    },
+    {
+      "signal": "一名 SpeakUp 讨论参与者要求不替换或改写原词，但仍希望自动加入标点，并支持 Voice Memo 文件。",
+      "evidence_type": "external_user",
+      "source_url": "https://www.reddit.com/r/MacOSApps/comments/1ulchsx/speakup_ondevice_mac_dictation_that_types_your/",
+      "limitation": "单个评论，主帖由 Maker 发布。"
+    },
+    {
+      "signal": "r/MacOS 讨论同时出现两种相反反馈：有人因系统 Dictation 启动和西班牙语表现寻找替代，也有人认为内置功能足够。",
+      "evidence_type": "external_user_and_counter",
+      "source_url": "https://www.reddit.com/r/MacOS/comments/1sor0nn/unpopular_opinion_paying_a_monthly_subscription/",
+      "limitation": "讨论混有供应方参与，需只转述明确的独立评论。"
+    }
+  ],
+  "external_evidence": [
+    {
+      "source_url": "https://developer.apple.com/videos/play/wwdc2025/277/",
+      "checked_at": "2026-07-24",
+      "evidence_type": "official_infrastructure",
+      "supported_claim": "系统级本地转写能力正在向第三方开发者开放。",
+      "limitation": "Apple 自述，不包含本报告用户场景的独立基准。"
+    },
+    {
+      "source_url": "https://tryvoiceink.com/pricing",
+      "checked_at": "2026-07-24",
+      "evidence_type": "commercial_pricing",
+      "supported_claim": "本地语音输入存在 $25-$49 一次性买断定价。",
+      "limitation": "公开价格不等于收入或留存。"
+    },
+    {
+      "source_url": "https://superwhisper.com/docs/get-started/sw-pro",
+      "checked_at": "2026-07-24",
+      "evidence_type": "commercial_pricing",
+      "supported_claim": "重度语音工作流同时存在月、年和终身付费档。",
+      "limitation": "没有公开付费用户规模。"
+    },
+    {
+      "source_url": "https://wisprflow.ai/business",
+      "checked_at": "2026-07-24",
+      "evidence_type": "commercial_pricing",
+      "supported_claim": "团队级语音输入存在 $15/用户/月与企业销售语境。",
+      "limitation": "不证明本报告提出的控制层有独立付费意愿。"
+    }
+  ],
+  "counter_evidence": [
+    {
+      "claim": "Megaphone 免费 MIT，VoiceInk GPL，基础转写与普通清理很容易被开源压价。",
+      "source_urls": [
+        "https://github.com/Kuberwastaken/megaphone",
+        "https://github.com/Beingpax/VoiceInk"
+      ]
+    },
+    {
+      "claim": "Apple 已在 Notes、Voice Memos、Journal 等系统应用使用同一模型，未来可继续吸收跨应用和词典体验。",
+      "source_urls": [
+        "https://developer.apple.com/videos/play/wwdc2025/277/"
+      ]
+    },
+    {
+      "claim": "用户对忠实原话和自动润色的偏好分裂，错误默认会破坏信任。",
+      "source_urls": [
+        "https://www.reddit.com/r/MacOSApps/comments/1ulchsx/speakup_ondevice_mac_dictation_that_types_your/",
+        "https://www.reddit.com/r/WisprFlow/comments/1ugj6ul/can_we_get_the_old_wispr_flow_accuracy_back/"
+      ]
+    },
+    {
+      "claim": "macOS 26、Apple silicon、语言与辅助功能权限限制了可覆盖用户；独立准确率尚未验证。",
+      "source_urls": [
+        "https://github.com/Kuberwastaken/megaphone",
+        "https://developer.apple.com/videos/play/wwdc2025/277/"
+      ]
+    }
+  ],
+  "product_images": [
+    {
+      "product": "Megaphone",
+      "product_role": "核心产品",
+      "ph_gallery_urls": [
+        "https://www.producthunt.com/products/megaphone-3"
+      ],
+      "official_ui_urls": [
+        "https://megaphone.kuber.studio/"
+      ],
+      "og_url": "https://megaphone.kuber.studio/assets/og-image.png",
+      "logo_url": "https://megaphone.kuber.studio/assets/app-icon.png",
+      "selected_source": "https://megaphone.kuber.studio/assets/og-image.png",
+      "image_status": "stable_official_url",
+      "failure_reason": "",
+      "include_in_article": true,
+      "image_role": "证明免费本地产品已经具备完整形态",
+      "selection_reason": "官方稳定 URL，且直接对应当天 PH 核心产品。"
+    },
+    {
+      "product": "SpeakUp",
+      "product_role": "核心对照",
+      "ph_gallery_urls": [],
+      "official_ui_urls": [
+        "https://www.getspeakup.app/"
+      ],
+      "og_url": "https://getspeakup.app/og-card.png",
+      "logo_url": "https://getspeakup.app/logo.png",
+      "selected_source": "https://getspeakup.app/og-card.png",
+      "image_status": "stable_official_url",
+      "failure_reason": "",
+      "include_in_article": true,
+      "image_role": "说明忠实原话与买断定价",
+      "selection_reason": "官网没有解析出更稳定的独立 UI 静态图，OG 是当前可核实的官方素材。"
+    },
+    {
+      "product": "VoiceInk",
+      "product_role": "核心对照",
+      "ph_gallery_urls": [],
+      "official_ui_urls": [
+        "https://github.com/Beingpax/VoiceInk",
+        "https://tryvoiceink.com/"
+      ],
+      "og_url": "https://tryvoiceink.com/social-preview.png",
+      "logo_url": "https://tryvoiceink.com/favicon.png",
+      "selected_source": "https://tryvoiceink.com/social-preview.png",
+      "image_status": "stable_official_url",
+      "failure_reason": "",
+      "include_in_article": true,
+      "image_role": "说明开源源码与付费分发并存",
+      "selection_reason": "官方稳定 URL；GitHub README 另有真实 Mac App 图，但直链未提取。"
+    }
+  ],
+  "mvp_blueprint": {
+    "target_user": "高频处理客户与技术文本的 Mac 开发者和顾问",
+    "single_problem": "无法稳定区分系统听到的原话与清理模型改写的内容",
+    "first_version": [
+      "SpeechAnalyzer 流式转写",
+      "原文与清理结果差异",
+      "Exact/标点/轻清理模式",
+      "每应用本地词典",
+      "本地历史默认关闭与 JSON 导入导出"
+    ],
+    "suggested_price": "$19-29 / ¥129-199 一次性",
+    "first_20_users": "MacOSApps、VoiceInk GitHub、开发者工具与独立顾问社群",
+    "seven_day_validation": "用 20 名用户的真实术语和改写错误测试；至少 3 人愿意支付一次性价格。",
+    "note": "仅供内部评分，不进入公众号正文。"
+  },
+  "risks_and_kill_criteria": [
+    "若目标用户普遍认为 Megaphone/VoiceInk 已足够，停止通用 App。",
+    "若 Apple 原生加入每应用词典和可审查清理，停止底层输入层。",
+    "若 diff 几乎不被查看，说明控制层不是独立价值。",
+    "若 20 名目标用户少于 2 人愿意买断，停止独立商业产品。",
+    "企业 Mac 的辅助功能权限和签名分发可能阻断高价值用户。"
+  ],
+  "source_urls": [
+    "https://developer.apple.com/documentation/Speech/SpeechAnalyzer",
+    "https://developer.apple.com/videos/play/wwdc2025/277/",
+    "https://www.producthunt.com/products/megaphone-3",
+    "https://megaphone.kuber.studio/",
+    "https://github.com/Kuberwastaken/megaphone",
+    "https://www.getspeakup.app/",
+    "https://tryvoiceink.com/pricing",
+    "https://github.com/Beingpax/VoiceInk",
+    "https://superwhisper.com/docs/get-started/sw-pro",
+    "https://wisprflow.ai/business",
+    "https://www.reddit.com/r/WisprFlow/comments/1ugj6ul/can_we_get_the_old_wispr_flow_accuracy_back/",
+    "https://www.reddit.com/r/WisprFlow/comments/1ugzkyi/wisprflows_history_is_a_huge_privacy_risk/",
+    "https://www.reddit.com/r/MacOSApps/comments/1ulchsx/speakup_ondevice_mac_dictation_that_types_your/",
+    "https://www.reddit.com/r/MacOS/comments/1sor0nn/unpopular_opinion_paying_a_monthly_subscription/"
+  ]
+}

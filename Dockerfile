@@ -15,6 +15,7 @@ RUN uv sync --frozen --no-dev
 
 # 复制应用代码
 COPY main.py ./
+COPY html_draft_studio.html ./
 COPY coze_oauth_config.json ./
 
 # 暴露端口
